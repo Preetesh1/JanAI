@@ -1,17 +1,27 @@
 import os
 import json
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 
 app = FastAPI(title="Civic GenAI Multilingual Prioritization Platform")
 
+# ---- CORS MIDDLEWARE SETUP ----
+# This allows your Next.js frontend to safely speak to FastAPI
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # ---- 1. INITIALIZE GEMINI CLIENT ----
-# Expects GEMINI_API_KEY environment variable to be set
 client = genai.Client()
 
 # ---- 2. DEFINE THE STRUCTURED OUTCOMES SCHEMA ----
@@ -50,7 +60,6 @@ active_submissions: List[Dict] = [
     }
 ]
 
-# Regional analytical baselines aligned with Gemini's category outputs
 regional_metrics_dataset: Dict[str, Dict] = {
     "Water": { "demographicDeficitScore": 85, "infrastructureGapScore": 90, "masterPlanConflict": False },
     "Roads": { "demographicDeficitScore": 40, "infrastructureGapScore": 85, "masterPlanConflict": True },
@@ -60,7 +69,6 @@ regional_metrics_dataset: Dict[str, Dict] = {
     "Electricity": { "demographicDeficitScore": 65, "infrastructureGapScore": 75, "masterPlanConflict": False }
 }
 
-# Input verification validation schema for analytical weighting assignments
 class WeightConfiguration(BaseModel):
     citizenDemand: int
     demographicDeficit: int
@@ -68,16 +76,20 @@ class WeightConfiguration(BaseModel):
 
 # ---- 4. LIVE API ENDPOINTS ----
 
+# --- FIXED: ADDED GET ROUTE ---
+@app.get("/api/submissions")
+def get_all_submissions():
+    """
+    Returns the raw list of active citizen submissions to the frontend.
+    """
+    return active_submissions
+
 @app.post("/api/submissions")
 async def submit_civic_issue(
     text_prompt: str = Form(..., description="The comment message text written or dictated by the citizen"),
     mode: str = Form(..., description="Ingestion gateway: Voice, Text, Photo, or WhatsApp"),
     image: Optional[UploadFile] = File(None, description="Optional image file attachment upload raw stream")
 ):
-    """
-    Ingest citizen submissions across Text/Voice/WhatsApp/Photos.
-    Passes data to Gemini 1.5 Flash to automatically translate, evaluate fields, and classify categories.
-    """
     try:
         contents = [
             "You are an AI assistant for a Member of Parliament's grievance portal. "
@@ -94,9 +106,8 @@ async def submit_civic_issue(
                 )
             )
             
-        # Execute Live GenAI Structured Query
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.5-flash',
             contents=contents,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
@@ -105,14 +116,14 @@ async def submit_civic_issue(
             ),
         )
         
-        # Safely parse structural response back to python dictionary format
         analysis_data = json.loads(response.text)
         
-        # Filter and log spam submissions instantly to isolate the MP dashboard view
         if analysis_data.get("is_spam_or_fake", False):
             return {"status": "rejected", "reason": "Submission flagged as spam/unrelated by GenAI validation layer.", "raw_analysis": analysis_data}
 
-        # Build dynamic geocoding mock anchored to city bounds based on extraction notes
+        # FIXED: Safe, modern timestamp generation string
+        current_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
         new_entry = {
             "id": f"SUB-{random.randint(100, 999)}",
             "mode": mode,
@@ -122,8 +133,7 @@ async def submit_civic_issue(
             "urgency_score": int(analysis_data.get("urgency_score", 5)),
             "is_spam": False,
             "landmarks": analysis_data.get("estimated_gps_landmarks", "Unspecified region"),
-            "timestamp": datetime.utcnow().isoformat() + "Z",
-            # Seeds standard bounding geometry configurations around regional center limits
+            "timestamp": current_time,
             "coordinates": {
                 "lat": round(24.58 + random.random() * 0.1, 4),
                 "lng": round(73.68 + random.random() * 0.1, 4)
@@ -134,14 +144,12 @@ async def submit_civic_issue(
         return {"status": "success", "message": "Submission ingested & processed by Gemini successfully", "data": new_entry}
         
     except Exception as e:
+        import traceback
+        traceback.print_exc() # Prints detailed terminal breakdown logs
         raise HTTPException(status_code=500, detail=f"Internal GenAI pipeline break error execution failure: {str(e)}")
 
 @app.get("/api/hotspots")
 def get_map_hotspots():
-    """
-    Groups dynamic geo-coordinates into categorical centers-of-mass,
-    weighting them by incoming complaint volumes and urgency values.
-    """
     groups: Dict[str, List[Dict]] = {}
     for sub in active_submissions:
         groups.setdefault(sub["category"], []).append(sub)
@@ -163,10 +171,6 @@ def get_map_hotspots():
 
 @app.post("/api/prioritize")
 def prioritize_challenges(weights: WeightConfiguration):
-    """
-    Combines live customer submission trends with static census tracking layers,
-    normalizing matrix arrays into a single priority list for the Member of Parliament.
-    """
     w_demand = weights.citizenDemand
     w_demographic = weights.demographicDeficit
     w_gap = weights.infrastructureGap
@@ -174,10 +178,8 @@ def prioritize_challenges(weights: WeightConfiguration):
     if w_demand + w_demographic + w_gap != 100:
         raise HTTPException(status_code=400, detail="Matrix weights metrics allocation configuration must sum up to exactly 100.")
 
-    # Calculate live public category metrics weights dynamically based on parsed volumes and severity
     category_volume_map: Dict[str, float] = {}
     for current in active_submissions:
-        # Multiplier: Scale tracking indices based directly on Gemini's parsed urgency score bounds
         severity_scalar = 2.5 if current["urgency_score"] >= 8 else 1.5 if current["urgency_score"] >= 5 else 1.0
         category_volume_map[current["category"]] = category_volume_map.get(current["category"], 0.0) + severity_scalar
 
