@@ -1,8 +1,7 @@
 // Talks to the FastAPI civic backend. Falls back to local demo data when the
 // backend isn't reachable, so the UI is always usable while you wire up the API.
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000";
+export const API_BASE = "https://janai-ycn3.onrender.com";
 
 export type Category =
   | "Water"
