@@ -13,12 +13,8 @@ app = FastAPI(title="Civic GenAI Multilingual Prioritization Platform")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000", 
-        "http://127.0.0.1:3000",
-        "https://jan-ai-beta.vercel.app" 
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],  # 🌟 Allows any Vercel deployment link to communicate with this API
+    allow_credentials=False, # ⚠️ Important: must be False when allow_origins is ["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
