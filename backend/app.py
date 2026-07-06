@@ -11,20 +11,20 @@ from google.genai import types
 
 app = FastAPI(title="Civic GenAI Multilingual Prioritization Platform")
 
-# ---- CORS MIDDLEWARE SETUP ----
-# This allows your Next.js frontend to safely speak to FastAPI
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000", 
+        "http://127.0.0.1:3000",
+        "https://jan-ai-beta.vercel.app" 
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---- 1. INITIALIZE GEMINI CLIENT ----
 client = genai.Client()
 
-# ---- 2. DEFINE THE STRUCTURED OUTCOMES SCHEMA ----
 class ComplaintAnalysis(BaseModel):
     category: str = Field(description="The sector: Water, Roads, Sanitation, Education, Health, or Electricity.")
     summary: str = Field(description="A concise 1-sentence English summary of the issue.")
@@ -32,7 +32,6 @@ class ComplaintAnalysis(BaseModel):
     is_spam_or_fake: bool = Field(description="True if the input is a joke, duplicate template, advertisement, or unrelated.")
     estimated_gps_landmarks: str = Field(description="Any street names, areas, or landmarks mentioned in text or visible in the image.")
 
-# ---- 3. DATABASE SEED DATA IN-MEMORY LAYERS ----
 active_submissions: List[Dict] = [
     { 
         "id": "SUB-001", 
@@ -74,14 +73,8 @@ class WeightConfiguration(BaseModel):
     demographicDeficit: int
     infrastructureGap: int
 
-# ---- 4. LIVE API ENDPOINTS ----
-
-# --- FIXED: ADDED GET ROUTE ---
 @app.get("/api/submissions")
 def get_all_submissions():
-    """
-    Returns the raw list of active citizen submissions to the frontend.
-    """
     return active_submissions
 
 @app.post("/api/submissions")
@@ -121,7 +114,6 @@ async def submit_civic_issue(
         if analysis_data.get("is_spam_or_fake", False):
             return {"status": "rejected", "reason": "Submission flagged as spam/unrelated by GenAI validation layer.", "raw_analysis": analysis_data}
 
-        # FIXED: Safe, modern timestamp generation string
         current_time = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         new_entry = {
@@ -145,7 +137,7 @@ async def submit_civic_issue(
         
     except Exception as e:
         import traceback
-        traceback.print_exc() # Prints detailed terminal breakdown logs
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Internal GenAI pipeline break error execution failure: {str(e)}")
 
 @app.get("/api/hotspots")
